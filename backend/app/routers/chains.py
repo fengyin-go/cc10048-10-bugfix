@@ -12,6 +12,8 @@ from app.compute import (
     chi_square_test, compute_calibrate_bias, compute_freshness_delay,
     generate_mock_metric_values, random_sample, segment_diff_report, t_test,
 )
+from app.duration import format_hours, try_parse_duration_hours
+from app.services.delivery import delivery_service
 from app.store import store
 
 router = APIRouter(prefix="/api/chains", tags=["业务链路"])
@@ -242,18 +244,32 @@ def chain_monitor_delivery(rule_id: int) -> dict[str, Any]:
     else:
         anomaly_result = anomaly_iqr(metric_data, multiplier=2.0)
 
-    # Step 2: 数据时效检查
-    freshness_configs = [row for row in store.rows("data_freshness")][:3]
+    # Step 2: 数据时效检查（与单独检查入口共用同一时效解析口径）
+    freshness_configs = [row for row in store.rows("data_freshness")]
     freshness_results = []
     for fc in freshness_configs:
-        expected = int(str(fc.get("期望时效", "24")).replace("h", "").replace("小时", "").strip()) if str(fc.get("期望时效", "24")).replace("h", "").strip().isdigit() else 24
+        raw_expected = fc.get("期望时效", "24")
+        expected = try_parse_duration_hours(raw_expected)
+        parse_ok = expected is not None
+        if not parse_ok:
+            expected = 24.0
         result = compute_freshness_delay(expected, str(fc.get("上次检查", "")))
         freshness_results.append({
             "config_id": fc.get("id"),
             "source": fc.get("数据来源"),
+            "expected_raw": raw_expected,
             "expected_hours": expected,
+            "expected_text": format_hours(expected),
+            "parse_ok": parse_ok,
+            "actual_arrival_time": result.get("actual_arrival_time"),
             "result": result,
         })
+
+    # Step 2.5: 按来源实际时效计算导出批次交付资格
+    delivery_eligibility = {
+        material_type: delivery_service.evaluate_material(material_type)
+        for material_type in ("到账明细", "退款明细", "混合明细")
+    }
 
     # Step 3: 数据导出
     export_tasks = [row for row in store.rows("data_export")][:3]
@@ -275,6 +291,7 @@ def chain_monitor_delivery(rule_id: int) -> dict[str, Any]:
                          "metric": rule.get("关联指标"), "level": rule.get("告警级别")},
         "anomaly_detection": anomaly_result,
         "data_freshness": freshness_results,
+        "delivery_eligibility": delivery_eligibility,
         "data_export": export_results,
     }
 

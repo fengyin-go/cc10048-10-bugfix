@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import ROUTERS
 from app.routers.chains import router as chains_router
+from app.routers.delivery import router as delivery_router
 from app.routers.domain import router as domain_router
 from app.store import store
 
@@ -38,6 +39,9 @@ def overview() -> dict[str, object]:
 
 # 业务链路路由
 app.include_router(chains_router)
+
+# 监控交付路由（导出批次交付资格与领取回执）
+app.include_router(delivery_router)
 
 # 领域业务操作路由
 app.include_router(domain_router)

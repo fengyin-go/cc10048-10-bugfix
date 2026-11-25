@@ -189,32 +189,46 @@ def generate_mock_metric_values(n: int = 30, base: float = 100.0, noise: float =
 
 
 def compute_freshness_delay(
-    expected_interval: int, last_check: str | None, current_time: str | None = None
+    expected_interval: float, last_check: str | None, current_time: str | None = None
 ) -> dict[str, Any]:
-    """计算数据时效延迟。"""
+    """计算数据时效延迟。
+
+    ``expected_interval`` 为期望时效（小时，支持小数，如 1.5）。
+    ``last_check`` 为来源数据的实际到数时间；无法解析时按恰好超期处理。
+    返回结果同时给出实际到数时间（``actual_arrival_time``），供两处
+    校验口径展示同一真实到数时间。
+    """
     now = datetime.now()
     if current_time:
         try:
             now = datetime.fromisoformat(current_time.replace("Z", "+00:00"))
         except (ValueError, TypeError):
             now = datetime.now()
+    expected_hours = float(expected_interval)
+    arrival_raw = last_check or None
     last = None
+    arrival_parse_ok = False
     if last_check:
         try:
-            last = datetime.fromisoformat(last_check.replace("Z", "+00:00"))
+            last = datetime.fromisoformat(str(last_check).replace("Z", "+00:00"))
+            arrival_parse_ok = True
         except (ValueError, TypeError):
-            last = now - timedelta(hours=expected_interval)
+            last = None
     if last is None:
-        last = now - timedelta(hours=expected_interval)
+        last = now - timedelta(hours=expected_hours)
     actual_delay_hours = (now - last).total_seconds() / 3600.0
-    status = "及时" if actual_delay_hours <= expected_interval else (
-        "延迟" if actual_delay_hours <= expected_interval * 2 else "严重延迟"
+    status = "及时" if actual_delay_hours <= expected_hours else (
+        "延迟" if actual_delay_hours <= expected_hours * 2 else "严重延迟"
     )
     return {
-        "expected_interval_hours": expected_interval,
+        "expected_interval_hours": expected_hours,
         "actual_delay_hours": round(actual_delay_hours, 2),
         "status": status,
         "seconds_since_last": round((now - last).total_seconds(), 0),
+        "actual_arrival_time": last.strftime("%Y-%m-%d %H:%M:%S") if arrival_parse_ok else None,
+        "arrival_time_raw": arrival_raw,
+        "arrival_parse_ok": arrival_parse_ok,
+        "checked_at": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
